@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Harmonix</title>
+    <title>Verify OTP - Harmonix</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         .login-page {
             min-height: 100vh;
@@ -34,6 +33,9 @@
             background: rgba(255, 255, 255, 0.05);
             color: white;
             box-sizing: border-box;
+            text-align: center;
+            font-size: 1.5rem;
+            letter-spacing: 5px;
         }
         .btn-primary {
             width: 100%;
@@ -45,30 +47,16 @@
             cursor: pointer;
             font-weight: bold;
         }
-        .divider {
-            text-align: center;
-            margin: 20px 0;
-            color: #888;
-            position: relative;
-        }
-        .divider::before, .divider::after {
-            content: "";
-            position: absolute;
-            top: 50%;
-            width: 40%;
-            height: 1px;
-            background: #444;
-        }
-        .divider::before { left: 0; }
-        .divider::after { right: 0; }
         .alert { padding: 10px; margin-bottom: 15px; border-radius: 6px; text-align: center; }
-        .alert-info { background: #0984e3; color: white; }
         .alert-danger { background: #d63031; color: white; }
     </style>
 </head>
 <body class="login-page">
     <div class="auth-container">
-        <h1 class="auth-heading">Harmonix Login</h1>
+        <h1 class="auth-heading">Verify OTP</h1>
+        <p style="color: #ccc; text-align: center; margin-bottom: 20px;">
+            An OTP has been sent to your email address.
+        </p>
         
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
@@ -80,24 +68,9 @@
 
         <form method="POST" action="">
             <div class="form-group">
-                <input type="text" name="username" class="form-control" placeholder="Username" required>
+                <input type="text" name="otp" class="form-control" placeholder="000000" required maxlength="6">
             </div>
-            <div class="form-group">
-                <input type="password" name="password" class="form-control" placeholder="Password" required>
-            </div>
-            <button type="submit" class="btn-primary">Sign In</button>
-        </form>
-
-        <div class="divider">OR</div>
-
-        <p style="color: #ccc; text-align: center; font-size: 0.9rem; margin-bottom: 15px;">
-            Verify email to Sign Up or reset access
-        </p>
-        <form method="POST" action="">
-            <div class="form-group">
-                <input type="email" name="email" class="form-control" placeholder="Enter your email" required>
-            </div>
-            <button type="submit" class="btn-primary" style="background: #2d3436; border: 1px solid #6c5ce7;">Verify Email</button>
+            <button type="submit" class="btn-primary">Verify OTP</button>
         </form>
     </div>
 </body>

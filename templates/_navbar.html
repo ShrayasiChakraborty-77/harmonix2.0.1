@@ -19,7 +19,7 @@
         </div>
         <a href="{{ url_for('blog') }}" class="nav-link {% if request.endpoint == 'blog' %}active{% endif %}"><i class="fas fa-blog"></i> Blog</a>
         {% if current_user.is_authenticated %}
-            <a href="{{ url_for('history') }}" class="nav-link {% if request.endpoint == 'history' %}active{% endif %}"><i class="fas fa-history"></i> History</a>
+            <a href="{{ url_for('history') }}" class="nav-link {% if request.endpoint == 'history' %}active{% endif %}"><i class="fas fa-user-circle"></i> User Profile History</a>
             <a href="{{ url_for('logout') }}" class="nav-link"><i class="fas fa-sign-out-alt"></i> Logout</a>
         {% else %}
             <a href="{{ url_for('login') }}" class="nav-link"><i class="fas fa-sign-in-alt"></i> Login</a>

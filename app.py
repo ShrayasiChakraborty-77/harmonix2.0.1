@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
 import numpy as np
 import librosa
 import joblib
@@ -6,6 +6,10 @@ import soundfile as sf
 import tempfile
 import os
 import pandas as pd
+import time
+import random
+import smtplib
+from email.message import EmailMessage
 from flask_login import login_user, current_user, logout_user, login_required
 from extensions import db, login_manager, bcrypt
 from models import User, History
@@ -21,9 +25,12 @@ login_manager.login_view = 'login'
 
 # Load ML components
 try:
+    print("Loading ML models...")
+    start_time = time.time()
     model = joblib.load('best_model.pkl')
     scaler = joblib.load('scaler.pkl')
     label_encoder = joblib.load('label_encoder.pkl')
+    print(f"ML models loaded in {time.time() - start_time:.2f}s")
 except Exception as e:
     print(f"Warning: ML models not loaded. {e}")
     model = None
@@ -33,6 +40,7 @@ except Exception as e:
 # Feature extraction (modified to take audio array and sr)
 def extract_features(y, sr):
     try:
+        start_feat = time.time()
         if y.ndim > 1:
             y = np.mean(y, axis=1)
 
@@ -67,10 +75,9 @@ def extract_features(y, sr):
 
         expected_feature_length = scaler.n_features_in_ if hasattr(scaler, 'n_features_in_') else 258
         if features.shape[0] != expected_feature_length:
-            # Try to handle mismatch or raise error
-            # For now, just logging
             print(f"Feature shape mismatch: {features.shape[0]}")
 
+        print(f"Feature extraction took {time.time() - start_feat:.2f}s")
         return features
     except Exception as e:
         print(f"Error processing audio: {str(e)}")
@@ -83,10 +90,9 @@ PITCH_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'
 
 def detect_key(y, sr):
     try:
-        # Harmonic-percussive separation
+        start_key = time.time()
+        # Use HPSS and CQT for accuracy, but on the short snippet
         y_harmonic, _ = librosa.effects.hpss(y)
-        
-        # Extract Chroma Features
         chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr)
         
         # Sum chroma vectors over time
@@ -117,14 +123,16 @@ def detect_key(y, sr):
             
         # Find best match
         best_match = max(correlations, key=lambda x: x[0])
+        print(f"Key detection took {time.time() - start_key:.2f}s")
         return best_match[1]
-        
     except Exception as e:
         print(f"Error in key detection: {e}")
         return "Unknown"
 
 def detect_chords(y, sr):
     try:
+        start_chords = time.time()
+        # Use HPSS and CQT for accuracy, but on the short snippet
         y_harmonic, _ = librosa.effects.hpss(y)
         chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr)
         
@@ -148,7 +156,7 @@ def detect_chords(y, sr):
         frame_time = librosa.frames_to_time(np.arange(frames), sr=sr)
         
         current_chord = None
-        start_time = 0
+        start_time_chord = 0
         results = []
         
         for t in range(frames):
@@ -168,304 +176,291 @@ def detect_chords(y, sr):
                 if current_chord is not None:
                     results.append({
                         "chord": current_chord,
-                        "start": round(start_time, 2),
+                        "start": round(start_time_chord, 2),
                         "end": round(frame_time[t], 2)
                     })
                 current_chord = best_chord
-                start_time = frame_time[t]
+                start_time_chord = frame_time[t]
                 
         if current_chord is not None:
              results.append({
                 "chord": current_chord,
-                "start": round(start_time, 2),
+                "start": round(start_time_chord, 2),
                 "end": round(frame_time[-1], 2)
             })
             
         # Filter very short chords
         final_results = [r for r in results if (r['end'] - r['start']) > 0.2]
+        print(f"Chord detection took {time.time() - start_chords:.2f}s")
         return final_results
-        
     except Exception as e:
         print(f"Error in chord detection: {e}")
         return []
-
-with app.app_context():
-    db.create_all()
 
 @app.route('/')
 @login_required
 def index():
     return render_template('index.html')
 
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if current_user.is_authenticated:
-        return redirect(url_for('index'))
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
-        user = User(username=username, password=hashed_password)
-        try:
-            db.session.add(user)
-            db.session.commit()
-            flash('Your account has been created! You can now log in', 'success')
-            return redirect(url_for('login'))
-        except:
-            flash('Username already exists.', 'danger')
-    return render_template('register.html')
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
     if request.method == 'POST':
+        if 'email' in request.form:
+            # Email entry (Step 1)
+            email = request.form.get('email')
+            otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
+            session['otp'] = otp
+            session['temp_email'] = email
+
+            msg = EmailMessage()
+            msg.set_content(f'Your OTP for Harmonix is: {otp}')
+            msg['Subject'] = 'Harmonix OTP Verification'
+            msg['From'] = 'srgtesting2004@gmail.com'
+            msg['To'] = email
+
+            try:
+                server = smtplib.SMTP('smtp.gmail.com', 587)
+                server.starttls()
+                server.login('srgtesting2004@gmail.com', 'dmko fouw kjdu qomh')
+                server.send_message(msg)
+                server.quit()
+                flash('An OTP has been sent to your email.', 'info')
+                return redirect(url_for('verify'))
+            except Exception as e:
+                flash('Failed to send OTP. Please try again.', 'danger')
+        else:
+            # Username/Password entry (Step 4 fallback)
+            username = request.form.get('username')
+            password = request.form.get('password')
+            user = User.query.filter_by(username=username).first()
+            if user and bcrypt.check_password_hash(user.password, password):
+                login_user(user)
+                return redirect(url_for('index'))
+            else:
+                flash('Login Unsuccessful. Please check username and password', 'danger')
+    return render_template('login.html')
+
+@app.route('/verify', methods=['GET', 'POST'])
+def verify():
+    if 'temp_email' not in session:
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        user_otp = request.form.get('otp')
+        if user_otp == session.get('otp'):
+            email = session.get('temp_email')
+            user = User.query.filter_by(email=email).first()
+            if user:
+                login_user(user)
+                session.pop('otp', None)
+                session.pop('temp_email', None)
+                return redirect(url_for('index'))
+            else:
+                # New user, go to setup profile
+                return redirect(url_for('setup_profile'))
+        else:
+            flash('Invalid OTP. Access Denied.', 'danger')
+    return render_template('verify.html')
+
+@app.route('/setup-profile', methods=['GET', 'POST'])
+def setup_profile():
+    if 'temp_email' not in session:
+        return redirect(url_for('login'))
+    if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        user = User.query.filter_by(username=username).first()
-        if user and bcrypt.check_password_hash(user.password, password):
-            login_user(user)
-            next_page = request.args.get('next')
-            return redirect(next_page) if next_page else redirect(url_for('index'))
-        else:
-            flash('Login Unsuccessful. Please check username and password', 'danger')
-    return render_template('login.html')
+        genres = request.form.get('favourite_genres')
+        artists = request.form.get('favourite_artists')
+        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+        user = User(email=session['temp_email'], username=username, password=hashed_password, 
+                    favourite_genres=genres, favourite_artists=artists)
+        db.session.add(user)
+        db.session.commit()
+        login_user(user)
+        session.pop('otp', None)
+        session.pop('temp_email', None)
+        flash('Profile created successfully!', 'success')
+        return redirect(url_for('index'))
+    return render_template('setup_profile.html')
 
 @app.route('/logout')
 def logout():
     logout_user()
-    return redirect(url_for('index'))
+    flash('You have been logged out. You must verify your email again to sign back in via OTP.', 'info')
+    return redirect(url_for('login'))
 
 @app.route('/history')
 @login_required
 def history():
     user_history = History.query.filter_by(user_id=current_user.id).order_by(History.timestamp.desc()).all()
-    return render_template('history.html', history=user_history)
+    return render_template('history.html', history=user_history, user=current_user)
 
 @app.route('/metronome')
+@login_required
 def metronome():
     return render_template('metronome.html')
 
 @app.route('/pitch-tuner')
+@login_required
 def pitch_detector():
     return render_template('pitch-tuner.html')
 
 @app.route('/rhythm-detector')
+@login_required
 def rhythm_detector():
     return render_template('rhythm-detector.html')
 
 @app.route('/analyze-rhythm', methods=['POST'])
+@login_required
 def analyze_rhythm():
-    if 'audio_file' not in request.files:
-        return jsonify({'error': 'No audio file provided'})
-    
+    if 'audio_file' not in request.files: return jsonify({'error': 'No audio file provided'})
     audio_file = request.files['audio_file']
-    if audio_file.filename == '':
-        return jsonify({'error': 'No file selected'})
-
+    if audio_file.filename == '': return jsonify({'error': 'No file selected'})
     try:
+        start_time_rhythm = time.time()
         with tempfile.NamedTemporaryFile(delete=False, suffix=audio_file.filename) as temp_file:
             audio_file.save(temp_file.name)
             temp_file_path = temp_file.name
         
-        y, sr = librosa.load(temp_file_path, sr=None)
+        # Load with sr=None to ensure compatibility
+        y, sr = librosa.load(temp_file_path, sr=None, duration=20)
+        print(f"Audio loaded for rhythm in {time.time() - start_time_rhythm:.2f}s, sr={sr}")
+        
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
         tempo = librosa.beat.tempo(onset_envelope=onset_env, sr=sr)
         tempo_val = float(tempo[0])
-        
-        # Heuristic for Time Signature (4/4 vs 3/4)
-        # This is a simplification. A real implementation would require complex beat tracking and bar detection.
-        # We'll use a placeholder logic or basic analysis for the demo.
-        # For now, let's randomise or just default to 4/4 if we can't detect, but let's try to be smart.
-        # Actually, let's just return the tempo and a "Common Time" label for now, 
-        # as true meter detection is very hard without specific algorithms not in standard librosa.
-        # But the user asked for it. 
-        # Let's try to detect pulse.
-        
-        time_signature = "4/4" # Default
-        
-        # Save to history if logged in
-        if current_user.is_authenticated:
-            hist = History(activity_type='Rhythm Detection', 
-                           filename=audio_file.filename, 
-                           result=f"Tempo: {tempo_val:.1f} BPM, Signature: {time_signature}",
-                           author=current_user)
-            db.session.add(hist)
-            db.session.commit()
-            
-        return jsonify({
-            'tempo': round(tempo_val, 1),
-            'time_signature': time_signature,
-            'message': 'Rhythm analysis successful'
-        })
-        
-    except Exception as e:
+        res_str = f"Tempo: {tempo_val:.1f} BPM"
+        hist = History(activity_type='Rhythm Detection', filename=audio_file.filename, result=res_str, author=current_user)
+        db.session.add(hist)
+        db.session.commit()
+        print(f"Total rhythm analysis took {time.time() - start_time_rhythm:.2f}s")
+        return jsonify({'tempo': round(tempo_val, 1), 'time_signature': "4/4", 'message': 'Rhythm analysis successful'})
+    except Exception as e: 
+        print(f"Rhythm Error: {e}")
         return jsonify({'error': str(e)})
     finally:
-         if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+         if 'temp_file_path' in locals() and os.path.exists(temp_file_path): os.remove(temp_file_path)
 
 @app.route('/predict', methods=['POST'])
+@login_required
 def predict():
-    if 'audio_file' not in request.files:
-        return jsonify({'error': 'No audio file provided'})
-    
+    if 'audio_file' not in request.files: return jsonify({'error': 'No audio file provided'})
     audio_file = request.files['audio_file']
-    
-    if audio_file.filename == '':
-        return jsonify({'error': 'No file selected'})
-    
-    # Get trimming parameters
-    start_time = float(request.form.get('start_time', 0))
-    end_time = float(request.form.get('end_time', 30))
-    
+    if audio_file.filename == '': return jsonify({'error': 'No file selected'})
+    start_time_req = float(request.form.get('start_time', 0))
+    end_time_req = float(request.form.get('end_time', 30))
     try:
-        # Save uploaded file temporarily
+        start_time_predict = time.time()
         with tempfile.NamedTemporaryFile(delete=False, suffix=audio_file.filename) as temp_file:
             audio_file.save(temp_file.name)
             temp_file_path = temp_file.name
         
-        # Load audio with librosa
-        y, sr = librosa.load(temp_file_path, sr=None, mono=True)
+        # Load for prediction
+        duration = end_time_req - start_time_req
+        y, sr = librosa.load(temp_file_path, sr=None, mono=True, offset=start_time_req, duration=duration)
+        print(f"Audio loaded for prediction in {time.time() - start_time_predict:.2f}s, sr={sr}")
         
-        # Trim audio based on user selection
-        y_trim = y[int(start_time * sr):int(end_time * sr)]
+        features = extract_features(y, sr)
+        if features is None: return jsonify({'error': 'Feature extraction failed'})
+        if model is None: return jsonify({'error': 'Model not loaded'})
         
-        # Extract features
-        features = extract_features(y_trim, sr)
-        
-        if features is None:
-            return jsonify({'error': 'Feature extraction failed'})
-        
-        if model is None:
-             return jsonify({'error': 'Model not loaded'})
-
-        # Scale features and predict
         features_scaled = scaler.transform([features])
         prediction = model.predict(features_scaled)
         predicted_genre = label_encoder.inverse_transform(prediction)[0]
         
-        # Get probabilities if model supports it
+        hist = History(activity_type='Genre Prediction', filename=audio_file.filename, result=predicted_genre, author=current_user)
+        db.session.add(hist)
+        db.session.commit()
+        
         probabilities = {}
         if hasattr(model, 'predict_proba'):
             probs = model.predict_proba(features_scaled)[0]
-            for i, genre in enumerate(label_encoder.classes_):
-                probabilities[genre] = float(probs[i])  # Convert to float for JSON serialization
+            for i, genre in enumerate(label_encoder.classes_): probabilities[genre] = float(probs[i])
         else:
-            # If model doesn't support probabilities, create a one-hot vector
-            for i, genre in enumerate(label_encoder.classes_):
-                probabilities[genre] = 1.0 if i == prediction[0] else 0.0
+            for i, genre in enumerate(label_encoder.classes_): probabilities[genre] = 1.0 if i == prediction[0] else 0.0
         
-        # Save to history if logged in
-        if current_user.is_authenticated:
-            hist = History(activity_type='Genre Prediction', 
-                           filename=audio_file.filename, 
-                           result=predicted_genre,
-                           author=current_user)
-            db.session.add(hist)
-            db.session.commit()
-
-        return jsonify({
-            'predicted_genre': predicted_genre,
-            'probabilities': probabilities
-        })
-    
-    except Exception as e:
+        print(f"Total genre prediction took {time.time() - start_time_predict:.2f}s")
+        return jsonify({'predicted_genre': predicted_genre, 'probabilities': probabilities})
+    except Exception as e: 
+        print(f"Predict Error: {e}")
         return jsonify({'error': f'Error processing audio: {str(e)}'})
-    
     finally:
-        # Clean up temporary files
-        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        if 'temp_file_path' in locals() and os.path.exists(temp_file_path): os.remove(temp_file_path)
 
 @app.route('/scale-finder')
+@login_required
 def scale_finder():
     return render_template('scale-finder.html')
 
 @app.route('/analyze-scale', methods=['POST'])
+@login_required
 def analyze_scale():
-    if 'audio_file' not in request.files:
-        return jsonify({'error': 'No audio file provided'})
-    
+    if 'audio_file' not in request.files: return jsonify({'error': 'No audio file provided'})
     audio_file = request.files['audio_file']
-    if audio_file.filename == '':
-        return jsonify({'error': 'No file selected'})
-
+    if audio_file.filename == '': return jsonify({'error': 'No file selected'})
     try:
+        start_time_scale = time.time()
         with tempfile.NamedTemporaryFile(delete=False, suffix=audio_file.filename) as temp_file:
             audio_file.save(temp_file.name)
             temp_file_path = temp_file.name
         
-        y, sr = librosa.load(temp_file_path, sr=None)
+        # Load for scale
+        y, sr = librosa.load(temp_file_path, sr=None, duration=15)
+        print(f"Audio loaded for scale in {time.time() - start_time_scale:.2f}s, sr={sr}")
         
         detected_key = detect_key(y, sr)
-        
-        if current_user.is_authenticated:
-            hist = History(activity_type='Scale Finder', 
-                           filename=audio_file.filename, 
-                           result=f"Key: {detected_key}",
-                           author=current_user)
-            db.session.add(hist)
-            db.session.commit()
-            
-        return jsonify({
-            'key': detected_key,
-            'message': 'Scale analysis successful'
-        })
-        
-    except Exception as e:
+        hist = History(activity_type='Scale Finder', filename=audio_file.filename, result=f"Key: {detected_key}", author=current_user)
+        db.session.add(hist)
+        db.session.commit()
+        print(f"Total scale analysis took {time.time() - start_time_scale:.2f}s")
+        return jsonify({'key': detected_key, 'message': 'Scale analysis successful'})
+    except Exception as e: 
+        print(f"Scale Error: {e}")
         return jsonify({'error': str(e)})
     finally:
-         if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+         if 'temp_file_path' in locals() and os.path.exists(temp_file_path): os.remove(temp_file_path)
 
 @app.route('/blog')
+@login_required
 def blog():
     return render_template('blog.html')
 
 @app.route('/chord-tracker')
+@login_required
 def chord_tracker():
     return render_template('chord-tracker.html')
 
 @app.route('/analyze-chords', methods=['POST'])
+@login_required
 def analyze_chords():
-    if 'audio_file' not in request.files:
-        return jsonify({'error': 'No audio file provided'})
-    
+    if 'audio_file' not in request.files: return jsonify({'error': 'No audio file provided'})
     audio_file = request.files['audio_file']
-    if audio_file.filename == '':
-        return jsonify({'error': 'No file selected'})
-
+    if audio_file.filename == '': return jsonify({'error': 'No file selected'})
     try:
+        start_time_chords = time.time()
         with tempfile.NamedTemporaryFile(delete=False, suffix=audio_file.filename) as temp_file:
             audio_file.save(temp_file.name)
             temp_file_path = temp_file.name
         
-        y, sr = librosa.load(temp_file_path, sr=None)
+        # Load for chords
+        y, sr = librosa.load(temp_file_path, sr=None, duration=20)
+        print(f"Audio loaded for chords in {time.time() - start_time_chords:.2f}s, sr={sr}")
         
         chords = detect_chords(y, sr)
-        
-        # Simplified result for history
         chord_summary = ", ".join([c['chord'] for c in chords[:5]]) + "..." if chords else "No chords detected"
-        
-        if current_user.is_authenticated:
-            hist = History(activity_type='Chord Tracker', 
-                           filename=audio_file.filename, 
-                           result=f"Chords: {chord_summary}",
-                           author=current_user)
-            db.session.add(hist)
-            db.session.commit()
-            
-        return jsonify({
-            'chords': chords,
-            'message': 'Chord analysis successful'
-        })
-        
-    except Exception as e:
+        hist = History(activity_type='Chord Tracker', filename=audio_file.filename, result=f"Chords: {chord_summary}", author=current_user)
+        db.session.add(hist)
+        db.session.commit()
+        print(f"Total chord analysis took {time.time() - start_time_chords:.2f}s")
+        return jsonify({'chords': chords, 'message': 'Chord analysis successful'})
+    except Exception as e: 
+        print(f"Chord Error: {e}")
         return jsonify({'error': str(e)})
     finally:
-         if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+         if 'temp_file_path' in locals() and os.path.exists(temp_file_path): os.remove(temp_file_path)
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)

@@ -3,68 +3,111 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>History - Harmonix</title>
+    <title>User Profile & History - Harmonix</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        .history-container {
-            max-width: 800px;
-            margin: 30px auto;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 20px;
-            backdrop-filter: blur(10px);
+        .profile-header {
+            background: rgba(18, 18, 18, 0.8);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: 18px;
+            padding: 25px;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
         }
-        .history-table {
-            width: 100%;
-            border-collapse: collapse;
+        .profile-avatar {
+            width: 80px;
+            height: 80px;
+            background: #6c5ce7;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
             color: white;
+            border: 2px solid #FFD700;
         }
-        .history-table th, .history-table td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        .profile-info h1 { color: #FFD700; margin: 0 0 5px 0; font-size: 1.8rem; }
+        .profile-info p { color: #888; margin: 0; font-size: 0.9rem; }
+        .pref-tags { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+        .pref-tag {
+            padding: 4px 10px;
+            background: rgba(255, 215, 0, 0.1);
+            border: 1px solid rgba(255, 215, 0, 0.2);
+            color: #FFD700;
+            border-radius: 99px;
+            font-size: 0.75rem;
         }
-        .history-table th {
-            background: rgba(0, 0, 0, 0.2);
-            font-weight: bold;
+        .history-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: transform 0.2s;
         }
+        .history-card:hover { transform: translateX(5px); background: rgba(255, 255, 255, 0.05); }
+        .activity-type { font-weight: 700; color: #6c5ce7; margin-bottom: 3px; display: block; }
+        .activity-file { color: #ccc; font-size: 0.85rem; }
+        .activity-res { color: #FFD700; font-weight: 500; margin-top: 5px; font-size: 0.9rem; }
+        .activity-time { color: #555; font-size: 0.8rem; text-align: right; }
     </style>
 </head>
 <body>
     {% include '_navbar.html' %}
-    <div class="container">
-        <div class="page-header">
-            <h1>Activity History</h1>
-            <p>Your recent genre, rhythm, scale, and chord activity</p>
+    <div class="container" style="max-width: 900px; padding: 40px 20px;">
+        <div class="profile-header">
+            <div class="profile-avatar">
+                <i class="fas fa-user"></i>
+            </div>
+            <div class="profile-info">
+                <h1>{{ user.username }}</h1>
+                <p><i class="fas fa-envelope"></i> {{ user.email }}</p>
+                <p style="margin-top: 5px; color: #aaa;">ID: #{{ user.id }}</p>
+                <div class="pref-tags">
+                    {% if user.favourite_genres %}
+                        {% for genre in user.favourite_genres.split(',') %}
+                            <span class="pref-tag"><i class="fas fa-music"></i> {{ genre.strip() }}</span>
+                        {% endfor %}
+                    {% endif %}
+                    {% if user.favourite_artists %}
+                        {% for artist in user.favourite_artists.split(',') %}
+                            <span class="pref-tag"><i class="fas fa-microphone"></i> {{ artist.strip() }}</span>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
         </div>
-        <div class="history-container">
-            <table class="history-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Activity</th>
-                        <th>File</th>
-                        <th>Result</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in history %}
-                    <tr>
-                        <td>{{ item.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
-                        <td>{{ item.activity_type }}</td>
-                        <td>{{ item.filename }}</td>
-                        <td>{{ item.result }}</td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="4" style="text-align: center;">No history found.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+
+        <h2 style="color: white; margin-bottom: 20px; font-size: 1.4rem;"><i class="fas fa-history"></i> Activity History</h2>
+        
+        {% if history %}
+            {% for item in history %}
+            <div class="history-card">
+                <div>
+                    <span class="activity-type">{{ item.activity_type }}</span>
+                    <div class="activity-file">{{ item.filename }}</div>
+                    <div class="activity-res">{{ item.result }}</div>
+                </div>
+                <div class="activity-time">
+                    <div>{{ item.timestamp.strftime('%Y-%m-%d') }}</div>
+                    <div>{{ item.timestamp.strftime('%H:%M') }}</div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div style="text-align: center; color: #555; padding: 40px;">
+                <i class="fas fa-folder-open" style="font-size: 3rem; margin-bottom: 15px; display: block;"></i>
+                No activity history found yet.
+            </div>
+        {% endif %}
     </div>
     {% include '_mood_assistant.html' %}
 </body>
